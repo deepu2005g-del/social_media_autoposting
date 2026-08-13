@@ -2,7 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
 
-const API = import.meta.env.VITE_API_URL || "https://social-media-autoposting.onrender.com";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 function Login() {
     const [email, setEmail] = useState("");
@@ -16,6 +16,7 @@ function Login() {
         setLoading(true);
         setError("");
         try {
+            localStorage.removeItem("token");
             const res = await axios.post(`${API}/auth/login`, { email, password });
             localStorage.setItem("token", res.data.access_token);
             navigate("/dashboard");
@@ -44,7 +45,7 @@ function Login() {
                 <h1 style={styles.title}>Welcome Back</h1>
                 <p style={styles.subtitle}>Supercharge your LinkedIn with AI</p>
 
-                <form onSubmit={handleLogin} style={styles.form}>
+                <form onSubmit={handleLogin} style={styles.form} autoComplete="off">
                     <div style={styles.inputGroup}>
                         <label style={styles.label}>Email Address</label>
                         <input
@@ -54,6 +55,7 @@ function Login() {
                             onChange={(e) => setEmail(e.target.value)}
                             required
                             style={styles.input}
+                            autoComplete="off"
                         />
                     </div>
 
@@ -68,7 +70,7 @@ function Login() {
                             onChange={(e) => setPassword(e.target.value)}
                             required
                             style={styles.input}
-                            autoComplete="current-password"
+                            autoComplete="new-password"
                         />
                     </div>
 

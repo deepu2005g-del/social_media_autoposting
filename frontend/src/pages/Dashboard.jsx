@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
-const API = import.meta.env.VITE_API_URL || "https://social-media-autoposting.onrender.com";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 /* ─── Deep Space AI Background ─────────────────────────────────── */
 function DeepSpaceBackground({ mousePos }) {
@@ -288,11 +288,6 @@ const TwitterIcon = ({ size = 24, color = "#fff" }) => (
         <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
     </svg>
 );
-const InstagramIcon = ({ size = 24, color = "#fff" }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={color}>
-        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
-    </svg>
-);
 
 /* ─── Status Color Map ────────────────────────────────────────── */
 const statusThemes = {
@@ -314,17 +309,19 @@ function Dashboard() {
     const [linkedinConnected, setLinkedinConnected] = useState(false);
     const [twitterConnected, setTwitterConnected] = useState(false);
     const [twitterScreenName, setTwitterScreenName] = useState("");
-    const [instagramConnected, setInstagramConnected] = useState(false);
-    const [instagramUsername, setInstagramUsername] = useState("");
     const [statusMessage, setStatusMessage] = useState("");
     const [statusType, setStatusType] = useState("success");
     const [imagePrompt, setImagePrompt] = useState("");
     const [generatingImage, setGeneratingImage] = useState(false);
-    const [selectedImage, setSelectedImage] = useState(null);
-    const [imagePreview, setImagePreview] = useState(null);
+    const [selectedImages, setSelectedImages] = useState([]); // array of File
+    const [imagePreviews, setImagePreviews] = useState([]); // array of preview URLs / base64
     const [posting, setPosting] = useState(false);
     const [charCount, setCharCount] = useState(0);
-    const [postTo, setPostTo] = useState({ linkedin: true, twitter: false, instagram: false });
+    const [postTo, setPostTo] = useState({ linkedin: true, twitter: false });
+    const [scheduleEnabled, setScheduleEnabled] = useState(false);
+    const [scheduleDate, setScheduleDate] = useState("");
+    const [scheduleTime, setScheduleTime] = useState("");
+    const [scheduleAmPm, setScheduleAmPm] = useState("AM");
     const fileInputRef = useRef(null);
 
     /* ─── Parallax Mouse ─────────────────────────────────── */
@@ -343,7 +340,6 @@ function Dashboard() {
     const tiltHeader = useTilt(4);
     const tiltLI = useTilt(10);
     const tiltTW = useTilt(10);
-    const tiltIG = useTilt(10);
     const tiltContent = useTilt(4);
     const tiltImage = useTilt(4);
     const tiltEditor = useTilt(4);
@@ -357,11 +353,13 @@ function Dashboard() {
         const params = new URLSearchParams(window.location.search);
         if (params.get("linkedin") === "success") { showStatus("✅ LinkedIn connected!", "success"); window.history.replaceState({}, "", "/dashboard"); }
         else if (params.get("linkedin") === "error") { showStatus("❌ LinkedIn: " + (params.get("message") || "Failed"), "error"); window.history.replaceState({}, "", "/dashboard"); }
-        if (params.get("instagram") === "success") { showStatus("✅ Instagram connected!", "success"); window.history.replaceState({}, "", "/dashboard"); }
-        else if (params.get("instagram") === "error") { showStatus("❌ Instagram: " + (params.get("message") || "Failed"), "error"); window.history.replaceState({}, "", "/dashboard"); }
-        axios.get(`${API}/linkedin/status`, { headers }).then(res => setLinkedinConnected(res.data.connected)).catch(() => { });
-        axios.get(`${API}/twitter/status`, { headers }).then(res => { setTwitterConnected(res.data.connected); if (res.data.screen_name) setTwitterScreenName(res.data.screen_name); }).catch(() => { });
-        axios.get(`${API}/instagram/status`, { headers }).then(res => { setInstagramConnected(res.data.connected); if (res.data.username) setInstagramUsername(res.data.username); }).catch(() => { });
+        axios.get(`${API}/linkedin/status`, { headers })
+            .then(res => setLinkedinConnected(Boolean(res.data?.connected)))
+            .catch(() => setLinkedinConnected(false));
+        axios.get(`${API}/twitter/status`, { headers })
+            .then(res => { setTwitterConnected(Boolean(res.data?.connected)); if (res.data?.screen_name) setTwitterScreenName(res.data.screen_name); })
+            .catch(() => setTwitterConnected(false));
+
     }, [navigate]);
 
     useEffect(() => { setCharCount(generatedText.length); }, [generatedText]);
@@ -372,53 +370,119 @@ function Dashboard() {
     const generateContent = async () => {
         if (!topic.trim()) { showStatus("⚠️ Enter a topic first!", "error"); return; }
         setLoading(true);
-        try { const res = await axios.post(`${API}/content/generate`, { topic, tone, length }); setGeneratedText(res.data.generated_text); showStatus("✨ Content generated!", "success"); }
+        const token = localStorage.getItem("token");
+        try { const res = await axios.post(`${API}/content/generate`, { topic, tone, length }, { headers: { Authorization: `Bearer ${token}` } }); setGeneratedText(res.data.generated_text); showStatus("✨ Content generated!", "success"); }
         catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); }
         setLoading(false);
     };
     const clearContent = () => { setGeneratedText(""); showStatus("🗑️ Cleared", "info"); };
-    const loginLinkedIn = async () => { try { const res = await axios.get(`${API}/linkedin/login`); window.location.href = res.data.auth_url; } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
-    const disconnectLinkedIn = async () => { if (!window.confirm("Disconnect LinkedIn?")) return; try { await axios.delete(`${API}/linkedin/disconnect`); setLinkedinConnected(false); showStatus("🔓 LinkedIn disconnected", "info"); } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
-    const loginTwitter = async () => { try { const res = await axios.get(`${API}/twitter/login`); window.location.href = res.data.auth_url; } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
-    const disconnectTwitter = async () => { if (!window.confirm("Disconnect Twitter/X?")) return; try { await axios.delete(`${API}/twitter/disconnect`); setTwitterConnected(false); setTwitterScreenName(""); showStatus("🔓 Twitter disconnected", "info"); } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
-    const loginInstagram = async () => { const token = localStorage.getItem("token"); try { const res = await axios.get(`${API}/instagram/login`, { headers: { Authorization: `Bearer ${token}` } }); window.location.href = res.data.auth_url; } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
-    const disconnectInstagram = async () => { if (!window.confirm("Disconnect Instagram?")) return; const token = localStorage.getItem("token"); try { await axios.delete(`${API}/instagram/disconnect`, { headers: { Authorization: `Bearer ${token}` } }); setInstagramConnected(false); setInstagramUsername(""); showStatus("🔓 Instagram disconnected", "info"); } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
-    const handleImageSelect = (e) => { const file = e.target.files[0]; if (!file) return; if (!file.type.startsWith("image/")) { showStatus("⚠️ Select a valid image", "error"); return; } if (file.size > 10 * 1024 * 1024) { showStatus("⚠️ Max 10MB", "error"); return; } setSelectedImage(file); setImagePreview(URL.createObjectURL(file)); showStatus("🖼️ Image attached!", "success"); };
-    const removeImage = () => { setSelectedImage(null); if (imagePreview) URL.revokeObjectURL(imagePreview); setImagePreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; };
+    const loginLinkedIn = async () => { try { const token = localStorage.getItem("token"); const res = await axios.get(`${API}/linkedin/login`, { headers: { Authorization: `Bearer ${token}` } }); window.location.href = res.data.auth_url; } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
+    const disconnectLinkedIn = async () => { if (!window.confirm("Disconnect LinkedIn?")) return; try { const token = localStorage.getItem("token"); await axios.delete(`${API}/linkedin/disconnect`, { headers: { Authorization: `Bearer ${token}` } }); setLinkedinConnected(false); showStatus("🔓 LinkedIn disconnected", "info"); } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
+    const loginTwitter = async () => { try { const token = localStorage.getItem("token"); const res = await axios.get(`${API}/twitter/login`, { headers: { Authorization: `Bearer ${token}` } }); window.location.href = res.data.auth_url; } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
+    const disconnectTwitter = async () => { if (!window.confirm("Disconnect Twitter/X?")) return; try { const token = localStorage.getItem("token"); await axios.delete(`${API}/twitter/disconnect`, { headers: { Authorization: `Bearer ${token}` } }); setTwitterConnected(false); setTwitterScreenName(""); showStatus("🔓 Twitter disconnected", "info"); } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); } };
+    const handleImageSelect = (e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+        const validFiles = [];
+        const previews = [];
+        for (const file of files) {
+            if (!file.type.startsWith("image/")) { showStatus(`⚠️ Skipped non-image: ${file.name}`, "error"); continue; }
+            if (file.size > 10 * 1024 * 1024) { showStatus(`⚠️ Skipped (>${10}MB): ${file.name}`, "error"); continue; }
+            validFiles.push(file);
+            previews.push(URL.createObjectURL(file));
+        }
+        if (validFiles.length === 0) return;
+        setSelectedImages(prev => [...prev, ...validFiles]);
+        setImagePreviews(prev => [...prev, ...previews]);
+        showStatus("🖼️ Image(s) attached!", "success");
+        // clear input so same file can be selected again
+        if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+
+    const removeImage = (index) => {
+        setSelectedImages(prev => {
+            const next = [...prev];
+            next.splice(index, 1);
+            return next;
+        });
+        setImagePreviews(prev => {
+            if (!prev[index]) return prev;
+            try { URL.revokeObjectURL(prev[index]); } catch (e) {}
+            const next = [...prev];
+            next.splice(index, 1);
+            return next;
+        });
+    };
+
+    const clearAllImages = () => {
+        imagePreviews.forEach(p => { try { URL.revokeObjectURL(p); } catch (e) {} });
+        setSelectedImages([]);
+        setImagePreviews([]);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+    };
     const handleGenerateImage = async () => {
         if (!imagePrompt.trim()) { showStatus("⚠️ Enter an image prompt first!", "error"); return; }
         setGeneratingImage(true);
+        const token = localStorage.getItem("token");
         try {
-            const res = await axios.post(`${API}/content/generate-image`, { prompt: imagePrompt });
+            const res = await axios.post(`${API}/content/generate-image`, { prompt: imagePrompt }, { headers: { Authorization: `Bearer ${token}` } });
             let base64Data = res.data.image_base64; let fileObj = null;
             if (base64Data) { const fetchRes = await fetch(base64Data); const blob = await fetchRes.blob(); fileObj = new File([blob], "generated_image.jpg", { type: "image/jpeg" }); }
             else if (res.data.image_url) { const imageRes = await fetch(res.data.image_url); const blob = await imageRes.blob(); fileObj = new File([blob], "generated_image.jpg", { type: "image/jpeg" }); base64Data = res.data.image_url; }
-            setSelectedImage(fileObj); setImagePreview(base64Data); showStatus("🎨 Image generated!", "success");
+            // Append generated image to arrays
+            if (fileObj) setSelectedImages(prev => [...prev, fileObj]);
+            setImagePreviews(prev => [...prev, base64Data]);
+            showStatus("🎨 Image generated!", "success");
         } catch (err) { showStatus("❌ " + (err.response?.data?.detail || err.message), "error"); }
         setGeneratingImage(false);
     };
     const postContent = async () => {
         if (!generatedText.trim()) { showStatus("⚠️ Write or generate content first!", "error"); return; }
-        const targets = []; if (postTo.linkedin && linkedinConnected) targets.push("linkedin"); if (postTo.twitter && twitterConnected) targets.push("twitter"); if (postTo.instagram && instagramConnected) targets.push("instagram");
+        const targets = []; if (postTo.linkedin && linkedinConnected) targets.push("linkedin"); if (postTo.twitter && twitterConnected) targets.push("twitter");
         if (targets.length === 0) { showStatus("⚠️ Select at least one connected platform!", "error"); return; }
         setPosting(true); const results = [];
         const token = localStorage.getItem("token");
-        for (const platform of targets) {
+                for (const platform of targets) {
             try {
                 const formData = new FormData();
                 formData.append("text", generatedText);
-                if (selectedImage) formData.append("image", selectedImage);
-                const headers = { "Content-Type": "multipart/form-data" };
-                if (platform === "instagram") headers["Authorization"] = `Bearer ${token}`;
-                const res = await axios.post(`${API}/${platform}/post`, formData, { headers });
+                // append multiple images (backend expects 'images')
+                if (selectedImages && selectedImages.length > 0) {
+                    for (const file of selectedImages) {
+                        formData.append("images", file);
+                    }
+                }
+                if (scheduleEnabled && scheduleDate && scheduleTime) {
+                    try {
+                        // compose local Date from date + time + AM/PM
+                        let [hh, mm] = scheduleTime.split(":");
+                        hh = parseInt(hh, 10); mm = parseInt(mm, 10);
+                        if (scheduleAmPm === "PM" && hh < 12) hh += 12;
+                        if (scheduleAmPm === "AM" && hh === 12) hh = 0;
+                        const parts = scheduleDate.split("-");
+                        const y = parseInt(parts[0], 10), m = parseInt(parts[1], 10) - 1, d = parseInt(parts[2], 10);
+                        const dt = new Date(y, m, d, hh, mm, 0);
+                        formData.append("scheduled_time", dt.toISOString());
+                    } catch (e) {
+                        console.warn("Invalid scheduled time", e);
+                    }
+                }
+                const res = await axios.post(`${API}/${platform}/post`, formData, { headers: { "Content-Type": "multipart/form-data", "Authorization": `Bearer ${token}` } });
                 results.push(`✅ ${platform}: ${res.data.message}`);
-            } catch (err) { results.push(`❌ ${platform}: ${err.response?.data?.detail || err.message}`); }
+            } catch (err) {
+                results.push(`❌ ${platform}: ${err.response?.data?.detail || err.message}`);
+            }
         }
-        showStatus(results.join("  •  "), results.some(r => r.startsWith("❌")) ? "error" : "success"); if (!results.some(r => r.startsWith("❌"))) removeImage(); setPosting(false);
+                
+                // attach scheduled time if requested
+                // (add once per platform loop before sending)
+                showStatus(results.join("  •  "), results.some(r => r.startsWith("❌")) ? "error" : "success");
+        if (!results.some(r => r.startsWith("❌"))) clearAllImages();
+        setPosting(false);
     };
     const copyToClipboard = () => { navigator.clipboard.writeText(generatedText); showStatus("📋 Copied!", "info"); };
 
-    const anyConnected = linkedinConnected || twitterConnected || instagramConnected;
+    const anyConnected = linkedinConnected || twitterConnected;
 
     /* ═══════════════════════════════════════════════════════════
        RENDER
@@ -496,12 +560,20 @@ function Dashboard() {
                             <p style={{ fontSize: 13, color: "#64748b", margin: "4px 0 0", fontWeight: 400, letterSpacing: "0.5px" }}>Supercharge your professional presence</p>
                         </div>
                     </div>
-                    <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                        onClick={handleLogout} style={{
-                            padding: "10px 22px", background: "rgba(245, 87, 108, 0.08)", border: "1px solid rgba(245, 87, 108, 0.2)",
-                            borderRadius: 12, color: "#f5576c", fontSize: 13, fontWeight: 700, cursor: "pointer", zIndex: 2,
-                            backdropFilter: "blur(8px)",
-                        }}>Logout</motion.button>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", zIndex: 2 }}>
+                        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                            onClick={() => navigate("/scheduled")} style={{
+                                padding: "10px 18px", background: "linear-gradient(135deg, #4facfe, #7c3aed)", border: "none",
+                                borderRadius: 12, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                                backdropFilter: "blur(8px)",
+                            }}>📅 Scheduled</motion.button>
+                        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                            onClick={handleLogout} style={{
+                                padding: "10px 22px", background: "rgba(245, 87, 108, 0.08)", border: "1px solid rgba(245, 87, 108, 0.2)",
+                                borderRadius: 12, color: "#f5576c", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                                backdropFilter: "blur(8px)",
+                            }}>Logout</motion.button>
+                    </div>
                 </motion.div>
 
                 {/* ════ STATUS BAR ════════════════════════════ */}
@@ -610,38 +682,6 @@ function Dashboard() {
                                 onClick={loginTwitter} style={{ ...S.btnConnect, background: "linear-gradient(135deg, #1d9bf0, #0c7abf)" }}>Connect</motion.button>
                         )}
                     </motion.div>
-
-                    {/* Instagram */}
-                    <motion.div whileHover={{ y: -6 }}
-                        ref={tiltIG.ref} onMouseMove={tiltIG.onMouseMove} onMouseLeave={tiltIG.onMouseLeave}
-                        style={{
-                            ...S.glassCard, flex: 1, borderRadius: 18, padding: "18px 20px",
-                            borderColor: instagramConnected ? "rgba(225,48,108,0.3)" : "rgba(255,255,255,0.06)",
-                            boxShadow: instagramConnected ? "0 10px 40px rgba(225,48,108,0.12), inset 0 1px 0 rgba(255,255,255,0.08)" : S.glassCard.boxShadow,
-                        }}
-                    >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                            <div style={{ width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg, #E1306C, #F77737)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 12px rgba(225,48,108,0.3)" }}>
-                                <InstagramIcon size={15} color="#fff" />
-                            </div>
-                            <span style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", flex: 1 }}>Instagram</span>
-                            <div style={{
-                                width: 10, height: 10, borderRadius: "50%",
-                                background: instagramConnected ? "#00ff88" : "#334155",
-                                boxShadow: instagramConnected ? "0 0 12px rgba(0,255,136,0.6)" : "none",
-                            }} />
-                        </div>
-                        {instagramConnected ? (
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                                <span style={{ fontSize: 12, color: "#00ff88", fontWeight: 600 }}>✓ @{instagramUsername}</span>
-                                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                                    onClick={disconnectInstagram} style={S.btnDisconnect}>Disconnect</motion.button>
-                            </div>
-                        ) : (
-                            <motion.button whileHover={{ scale: 1.03, boxShadow: "0 8px 24px rgba(225,48,108,0.3)" }} whileTap={{ scale: 0.97 }}
-                                onClick={loginInstagram} style={{ ...S.btnConnect, background: "linear-gradient(135deg, #E1306C, #F77737)" }}>Connect</motion.button>
-                        )}
-                    </motion.div>
                 </motion.div>
 
                 {/* ════ CONTENT GENERATION CARD ═══════════════ */}
@@ -702,9 +742,15 @@ function Dashboard() {
                             onClick={handleGenerateImage} disabled={generatingImage}
                             style={{ padding: "0 22px", fontSize: 13, fontWeight: 600, color: "#fff", background: "linear-gradient(135deg, #4facfe, #00f2fe)", border: "none", borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 110, opacity: generatingImage ? 0.7 : 1, boxShadow: "0 4px 16px rgba(79,172,254,0.25)" }}
                         >{generatingImage ? <span style={S.spinner} /> : "🎨 Generate"}</motion.button>
+
+                        {/* Always-visible Add Image button to open file picker */}
+                        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
+                            onClick={() => fileInputRef.current?.click()}
+                            style={{ padding: "0 18px", fontSize: 13, fontWeight: 600, color: "#fff", background: "linear-gradient(135deg, #f093fb, #f5576c)", border: "none", borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 110, boxShadow: "0 4px 16px rgba(240,147,251,0.25)" }}
+                        >📎 Add Image</motion.button>
                     </div>
 
-                    {!imagePreview ? (
+                    {imagePreviews.length === 0 ? (
                         <motion.div whileHover={{ borderColor: "rgba(79,172,254,0.5)", background: "rgba(79,172,254,0.04)" }}
                             onClick={() => fileInputRef.current?.click()}
                             style={{ border: "2px dashed rgba(79,172,254,0.2)", borderRadius: 16, padding: "32px 16px", textAlign: "center", cursor: "pointer", background: "rgba(255,255,255,0.02)", transition: "all 0.3s" }}
@@ -720,19 +766,25 @@ function Dashboard() {
                             <div style={{ fontSize: 11, color: "#4a5568", marginTop: 4 }}>JPG, PNG, GIF — Max 10MB</div>
                         </motion.div>
                     ) : (
-                        <div style={{ position: "relative", borderRadius: 14, overflow: "hidden", border: "1px solid rgba(79,172,254,0.15)" }}>
-                            <img src={imagePreview} alt="Preview" style={{ width: "100%", maxHeight: 250, objectFit: "contain", display: "block", background: "rgba(0,0,0,0.2)" }} />
-                            <div style={{ position: "absolute", top: 0, right: 0, padding: 8 }}>
-                                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={removeImage}
-                                    style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600, color: "#fff", background: "rgba(245,87,108,0.85)", border: "none", borderRadius: 10, cursor: "pointer", backdropFilter: "blur(4px)" }}>✕ Remove</motion.button>
-                            </div>
-                            <div style={{ padding: "8px 14px", fontSize: 11, color: "#64748b", background: "rgba(255,255,255,0.02)", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                                📎 {selectedImage?.name || "Generated Image"}
-                                <span style={{ fontSize: 10, color: "#4a5568", background: "rgba(79,172,254,0.08)", padding: "2px 8px", borderRadius: 8 }}>{selectedImage ? (selectedImage.size / 1024).toFixed(0) : 0} KB</span>
-                            </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+                            {imagePreviews.map((src, i) => (
+                                <div key={i} style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: "1px solid rgba(79,172,254,0.08)", background: "rgba(0,0,0,0.16)" }}>
+                                    <img src={src} alt={`preview-${i}`} style={{ width: "100%", height: 160, objectFit: "cover", display: "block" }} />
+                                    <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 8 }}>
+                                        <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => removeImage(i)}
+                                            style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, color: "#fff", background: "rgba(245,87,108,0.85)", border: "none", borderRadius: 10, cursor: "pointer" }}>✕</motion.button>
+                                        <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }} onClick={() => fileInputRef.current?.click()}
+                                            style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, color: "#fff", background: "linear-gradient(135deg, #4facfe, #00f2fe)", border: "none", borderRadius: 10, cursor: "pointer" }}>Replace</motion.button>
+                                    </div>
+                                    <div style={{ padding: "8px 12px", fontSize: 11, color: "#94a3b8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>{selectedImages[i]?.name || `image-${i+1}`}</span>
+                                        <span style={{ fontSize: 10, color: "#4a5568", background: "rgba(79,172,254,0.08)", padding: "2px 8px", borderRadius: 8 }}>{selectedImages[i] ? Math.round(selectedImages[i].size / 1024) : 0} KB</span>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
-                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
+                    <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} style={{ display: "none" }} />
                 </motion.div>
 
                 {/* ════ POST EDITOR CARD ══════════════════════ */}
@@ -768,7 +820,7 @@ function Dashboard() {
 
                     {/* Preview */}
                     <AnimatePresence>
-                        {(generatedText || imagePreview) && (
+                        {(generatedText || imagePreviews.length > 0) && (
                             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
                                 style={{ borderRadius: 14, marginBottom: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}
                             >
@@ -784,7 +836,13 @@ function Dashboard() {
                                         </div>
                                     </div>
                                     {generatedText && <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7, marginBottom: 10, whiteSpace: "pre-wrap" }}>{generatedText.length > 180 ? generatedText.substring(0, 180) + "..." : generatedText}</div>}
-                                    {imagePreview && <img src={imagePreview} alt="Post" style={{ width: "100%", maxHeight: 170, objectFit: "cover", borderRadius: 10, marginBottom: 10 }} />}
+                                    {imagePreviews.length > 0 && (
+                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 10 }}>
+                                            {imagePreviews.map((src, idx) => (
+                                                <img key={idx} src={src} alt={`post-preview-${idx}`} style={{ width: "100%", maxHeight: 170, objectFit: "cover", borderRadius: 10 }} />
+                                            ))}
+                                        </div>
+                                    )}
                                     <div style={{ display: "flex", justifyContent: "space-around", paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.05)", fontSize: 11, color: "#4a5568" }}>
                                         <span>👍 Like</span><span>💬 Comment</span><span>🔄 Repost</span><span>📤 Send</span>
                                     </div>
@@ -825,22 +883,8 @@ function Dashboard() {
                                 <TwitterIcon size={14} color={postTo.twitter ? "#1d9bf0" : "#4a5568"} />
                                 <span>Twitter/X</span>
                             </motion.button>
-                            <motion.button whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}
-                                onClick={() => setPostTo(p => ({ ...p, instagram: !p.instagram }))} disabled={!instagramConnected}
-                                style={{
-                                    display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", fontSize: 12, fontWeight: 600,
-                                    borderRadius: 12, cursor: instagramConnected ? "pointer" : "default",
-                                    background: postTo.instagram ? "rgba(225,48,108,0.1)" : "rgba(255,255,255,0.03)",
-                                    border: `1px solid ${postTo.instagram ? "rgba(225,48,108,0.3)" : "rgba(255,255,255,0.08)"}`,
-                                    color: postTo.instagram ? "#E1306C" : "#4a5568",
-                                    boxShadow: postTo.instagram ? "0 0 12px rgba(225,48,108,0.1)" : "none",
-                                    opacity: instagramConnected ? 1 : 0.4,
-                                }}>
-                                <InstagramIcon size={14} color={postTo.instagram ? "#E1306C" : "#4a5568"} />
-                                <span>Instagram</span>
-                            </motion.button>
                         </div>
-                        <div style={{ display: "flex", gap: 10 }}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                             <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
                                 onClick={copyToClipboard} disabled={!generatedText}
                                 style={{ ...S.btnCopy, opacity: generatedText ? 1 : 0.3 }}>📋 Copy</motion.button>
@@ -850,8 +894,23 @@ function Dashboard() {
                             >
                                 {posting
                                     ? <span style={S.loadingFlex}><span style={S.spinner} />Posting...</span>
-                                    : `📤 Post ${[postTo.linkedin && "LinkedIn", postTo.twitter && "Twitter", postTo.instagram && "Instagram"].filter(Boolean).join(" & ") || ""}`}
+                                    : `📤 Post ${[postTo.linkedin && "LinkedIn", postTo.twitter && "Twitter"].filter(Boolean).join(" & ") || ""}`}
                             </motion.button>
+                            <div style={{ marginLeft: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setScheduleEnabled(s => !s)}
+                                        style={{ padding: '8px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: scheduleEnabled ? 'linear-gradient(135deg,#4facfe,#7c3aed)' : 'rgba(255,255,255,0.03)', color: scheduleEnabled ? '#fff' : '#94a3b8', cursor: 'pointer' }}>
+                                        {scheduleEnabled ? '📅 Scheduling On' : '📅 Schedule (Off)'}
+                                    </motion.button>
+                                    <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: scheduleEnabled ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.12)', color: '#e2e8f0' }} />
+                                    <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: scheduleEnabled ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.12)', color: '#e2e8f0' }} />
+                                    <select value={scheduleAmPm} onChange={(e) => setScheduleAmPm(e.target.value)} style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: scheduleEnabled ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.12)', color: '#e2e8f0' }}>
+                                        <option>AM</option>
+                                        <option>PM</option>
+                                    </select>
+                                    <div style={{ fontSize: 12, color: scheduleEnabled ? '#cdeafe' : '#6b7280', marginLeft: 6 }}>{scheduleEnabled ? (scheduleDate && scheduleTime ? `Scheduled: ${scheduleDate} ${scheduleTime} ${scheduleAmPm}` : 'Choose date & time') : 'Scheduling is off'}</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </motion.div>
@@ -863,8 +922,6 @@ function Dashboard() {
                     <LinkedInIcon size={12} color="#334155" />
                     <span>+</span>
                     <TwitterIcon size={12} color="#334155" />
-                    <span>+</span>
-                    <InstagramIcon size={12} color="#334155" />
                     <span style={{ marginLeft: 4 }}>Social Media Poster — Powered by AI</span>
                 </motion.div>
             </motion.div>
