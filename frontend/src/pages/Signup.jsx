@@ -1,6 +1,7 @@
 import { useState } from "react";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -8,6 +9,8 @@ function Signup() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
@@ -25,7 +28,15 @@ function Signup() {
             localStorage.setItem("token", res.data.access_token);
             navigate("/dashboard");
         } catch (err) {
-            setError(err.response?.data?.detail || "Signup failed. Email might already exist.");
+            if (err.response?.data?.detail) {
+                setError(err.response.data.detail);
+            } else if (err.response?.status === 500) {
+                setError("Server error during registration. Please try again.");
+            } else if (!err.response) {
+                setError("Unable to connect to the server. Please ensure the backend is running.");
+            } else {
+                setError(err.message || "Signup failed. Please try again.");
+            }
         } finally {
             setLoading(false);
         }
@@ -64,32 +75,52 @@ function Signup() {
 
                     <div style={styles.inputGroup}>
                         <label style={styles.label}>Password</label>
-                        <input
-                            type="password"
-                            name="password"
-                            id="password"
-                            placeholder="Create a strong password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                            style={styles.input}
-                            autoComplete="new-password"
-                        />
+                        <div style={styles.passwordWrapper}>
+                            <input
+                                type={showPassword ? "text" : "password"}
+                                name="password"
+                                id="password"
+                                placeholder="Create a strong password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                required
+                                style={{ ...styles.input, paddingRight: "48px" }}
+                                autoComplete="new-password"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                style={styles.eyeButton}
+                                aria-label={showPassword ? "Hide password" : "Show password"}
+                            >
+                                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                            </button>
+                        </div>
                     </div>
 
                     <div style={styles.inputGroup}>
                         <label style={styles.label}>Confirm Password</label>
-                        <input
-                            type="password"
-                            name="confirmPassword"
-                            id="confirmPassword"
-                            placeholder="Confirm your password"
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            required
-                            style={styles.input}
-                            autoComplete="new-password"
-                        />
+                        <div style={styles.passwordWrapper}>
+                            <input
+                                type={showConfirmPassword ? "text" : "password"}
+                                name="confirmPassword"
+                                id="confirmPassword"
+                                placeholder="Confirm your password"
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                required
+                                style={{ ...styles.input, paddingRight: "48px" }}
+                                autoComplete="new-password"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                style={styles.eyeButton}
+                                aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                            >
+                                {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                            </button>
+                        </div>
                     </div>
 
                     {error && <p style={styles.error}>{error}</p>}
@@ -241,6 +272,26 @@ const styles = {
         color: "#00a0dc",
         textDecoration: "none",
         fontWeight: "700",
+        transition: "color 0.2s ease",
+    },
+    passwordWrapper: {
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        width: "100%",
+    },
+    eyeButton: {
+        position: "absolute",
+        right: "14px",
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        color: "#94a3b8",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "6px",
+        borderRadius: "8px",
         transition: "color 0.2s ease",
     },
 };
