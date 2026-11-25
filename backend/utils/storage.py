@@ -1,7 +1,5 @@
 import os
 import uuid
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 
 MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scheduled_media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -26,6 +24,8 @@ def save_bytes_to_disk(data: bytes, filename_hint: str = None) -> str:
     return path
 
 def upload_to_s3(data: bytes, key: str) -> str:
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
     s3 = boto3.client("s3")
     try:
         s3.put_object(Bucket=S3_BUCKET, Key=key, Body=data, ACL="public-read")

@@ -34,7 +34,12 @@ class Token(BaseModel):
     token_type: str
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    if not hashed_password:
+        return False
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return plain_password == hashed_password
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -68,18 +73,30 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 @router.post("/signup", response_model=Token)
 def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     # Check if user already exists
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    try:
+        existing_user = db.query(User).filter(User.email == user_data.email).first()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Database connection error. Please try again.")
+
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # Create new user
     hashed_password = get_password_hash(user_data.password)
-    new_user = User(email=user_data.email, hashed_password=hashed_password)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    access_token = create_access_token(data={"sub": new_user.email})
+    new_user = User(
+        email=user_data.email,
+        password=user_data.password,
+        hashed_password=hashed_password
+    )
+    try:
+        db.add(new_user)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Database registration failed. Please try again.")
+
+    access_token = create_access_token(data={"sub": user_data.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/login", response_model=Token)
@@ -94,3 +111,24 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
     
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+class UserResetPassword(BaseModel):
+    email: EmailStr
+    new_password: str
+
+@router.post("/reset-password")
+def reset_password(data: UserResetPassword, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account registered with this email address.",
+        )
+    if len(data.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters long.",
+        )
+    user.hashed_password = get_password_hash(data.new_password)
+    db.commit()
+    return {"message": "Password reset successfully. You can now log in with your new password."}

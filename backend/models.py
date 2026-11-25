@@ -34,7 +34,8 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
+    password = Column(String, nullable=True)
+    hashed_password = Column(String, nullable=True)
 
     linkedin_account = relationship("LinkedInUser", back_populates="user", uselist=False)
     twitter_account = relationship("TwitterUser", back_populates="user", uselist=False)

@@ -257,6 +257,21 @@ textarea::placeholder {
     color: rgba(148, 163, 184, 0.5);
 }
 
+/* Disable native browser password reveal button in Edge / Chrome */
+input::-ms-reveal,
+input::-ms-clear {
+    display: none;
+}
+
+/* Custom password eye toggle button hover & transition */
+.eye-toggle-btn {
+    transition: all 0.2s ease-in-out;
+}
+.eye-toggle-btn:hover {
+    color: #38bdf8 !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+
 /* ──────────────────────────────────────────────
    Canvas layers
 ────────────────────────────────────────────── */
