@@ -13,9 +13,11 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is missing. Please set your PostgreSQL connection string in backend/.env")
 
-# SQLAlchemy requires postgresql:// instead of postgres://
+# SQLAlchemy requires postgresql+psycopg2:// (SQLAlchemy 2.1+ defaults postgresql:// to psycopg v3)
 if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 # Robust DNS fallback: if local DNS cannot resolve Aiven's host, use its direct IP
 if "pg-5120fb8-ananyahp580cc.j.aivencloud.com" in DATABASE_URL:
