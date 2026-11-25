@@ -353,6 +353,8 @@ function Dashboard() {
         const params = new URLSearchParams(window.location.search);
         if (params.get("linkedin") === "success") { showStatus("✅ LinkedIn connected!", "success"); window.history.replaceState({}, "", "/dashboard"); }
         else if (params.get("linkedin") === "error") { showStatus("❌ LinkedIn: " + (params.get("message") || "Failed"), "error"); window.history.replaceState({}, "", "/dashboard"); }
+        else if (params.get("twitter") === "success") { showStatus("✅ Twitter/X connected!", "success"); window.history.replaceState({}, "", "/dashboard"); }
+        else if (params.get("twitter") === "error") { showStatus("❌ Twitter/X: " + (params.get("message") || "Failed"), "error"); window.history.replaceState({}, "", "/dashboard"); }
         axios.get(`${API}/linkedin/status`, { headers })
             .then(res => setLinkedinConnected(Boolean(res.data?.connected)))
             .catch(() => setLinkedinConnected(false));

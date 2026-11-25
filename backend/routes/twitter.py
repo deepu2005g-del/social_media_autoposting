@@ -15,7 +15,7 @@ from routes.auth import get_current_user, User
 
 router = APIRouter(prefix="/twitter", tags=["Twitter"])
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 TWITTER_CALLBACK_URL = os.getenv("TWITTER_CALLBACK_URL", "")
 
 # Temporary storage for OAuth request tokens (in production, use Redis/session)
@@ -55,11 +55,20 @@ def login(current_user: User = Depends(get_current_user)):
 
 # 🔹 Step 2: Callback — Twitter redirects here after authorization
 @router.get("/callback")
-def callback(oauth_token: str, oauth_verifier: str, db: Session = Depends(get_db)):
+def callback(
+    oauth_token: Optional[str] = None,
+    oauth_verifier: Optional[str] = None,
+    denied: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    dashboard_url = f"{FRONTEND_URL}/dashboard"
     try:
+        if denied or not oauth_token or not oauth_verifier:
+            return RedirectResponse(f"{dashboard_url}?twitter=error&message={quote('Twitter authorization was cancelled.')}")
+
         token_data = _oauth_tokens.pop(oauth_token, None)
         if not token_data:
-            return RedirectResponse(f"{FRONTEND_URL}?twitter=error&message={quote('Invalid OAuth session. Please try again.')}")
+            return RedirectResponse(f"{dashboard_url}?twitter=error&message={quote('Invalid OAuth session. Please try again.')}")
 
         oauth_token_secret = token_data["secret"]
         user_id = token_data["user_id"]
@@ -100,18 +109,18 @@ def callback(oauth_token: str, oauth_verifier: str, db: Session = Depends(get_db
             db.add(new_account)
         db.commit()
 
-        return RedirectResponse(f"{FRONTEND_URL}?twitter=success")
+        return RedirectResponse(f"{dashboard_url}?twitter=success")
 
     except Exception as e:
         print(f"[ERROR] Twitter callback: {e}")
-        return RedirectResponse(f"{FRONTEND_URL}?twitter=error&message={quote(str(e))}")
+        return RedirectResponse(f"{dashboard_url}?twitter=error&message={quote(str(e))}")
 
 
 # 🔹 Check connection status
 @router.get("/status")
 def status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     user = db.query(TwitterUser).filter(TwitterUser.user_id == current_user.id).first()
-    if user:
+    if user and user.access_token and user.access_token_secret:
         return {"connected": True, "screen_name": user.screen_name}
     return {"connected": False}
 

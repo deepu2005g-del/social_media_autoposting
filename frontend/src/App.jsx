@@ -10,11 +10,18 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
+const RootRedirect = () => {
+  const token = localStorage.getItem("token");
+  const search = window.location.search || "";
+  if (token) return <Navigate to={`/dashboard${search}`} replace />;
+  return <Navigate to={`/login${search}`} replace />;
+};
+
 function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

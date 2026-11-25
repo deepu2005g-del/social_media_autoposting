@@ -22,6 +22,7 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 class UserSignup(BaseModel):
+    full_name: Optional[str] = None
     email: EmailStr
     password: str
 
@@ -85,6 +86,7 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     # Create new user
     hashed_password = get_password_hash(user_data.password)
     new_user = User(
+        full_name=(user_data.full_name.strip() if user_data.full_name else None),
         email=user_data.email,
         password=user_data.password,
         hashed_password=hashed_password

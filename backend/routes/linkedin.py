@@ -1,38 +1,95 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from typing import Optional, List
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+import secrets
 import requests
 import os
 
 from db import get_db
 from models import LinkedInUser, User, ScheduledPost
-from config import CLIENT_ID, CLIENT_SECRET, REDIRECT_URI
-from routes.auth import get_current_user
+from config import CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, FRONTEND_URL as CONFIG_FRONTEND_URL
+from routes.auth import get_current_user, SECRET_KEY, ALGORITHM
+import logging
+
+logger = logging.getLogger("linkedin_oauth")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(prefix="/linkedin", tags=["LinkedIn"])
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or CONFIG_FRONTEND_URL or "http://localhost:5173").rstrip("/")
+OAUTH_STATE_EXPIRE_MINUTES = 10
+
+# In-memory nonce store for one-time OAuth state tracking (signed JWT also validates across restarts)
+_oauth_states = {}
+
+
+def _get_dashboard_url() -> str:
+    base = (os.getenv("FRONTEND_URL") or FRONTEND_URL).rstrip("/")
+    if base.endswith("/dashboard"):
+        return base
+    return f"{base}/dashboard"
+
+
+def _create_oauth_state(user_id: int) -> str:
+    nonce = secrets.token_urlsafe(24)
+    expire = datetime.utcnow() + timedelta(minutes=OAUTH_STATE_EXPIRE_MINUTES)
+    _oauth_states[nonce] = {"user_id": user_id, "exp": expire}
+    logger.info("[LinkedIn OAuth] Stage 2: State generated for user_id=%s (nonce_prefix=%s)", user_id, nonce[:6])
+    return jwt.encode(
+        {"sub": str(user_id), "nonce": nonce, "purpose": "linkedin_oauth", "exp": expire},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def _validate_oauth_state(state: Optional[str]) -> Optional[int]:
+    if not state:
+        logger.warning("[LinkedIn OAuth] Stage 4: State validation failed (missing state)")
+        return None
+    try:
+        payload = jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") != "linkedin_oauth":
+            logger.warning("[LinkedIn OAuth] Stage 4: State validation failed (wrong purpose)")
+            return None
+        user_id = int(payload.get("sub"))
+        nonce = payload.get("nonce")
+        if nonce and nonce in _oauth_states:
+            stored = _oauth_states.pop(nonce, None)
+            if stored and stored.get("user_id") != user_id:
+                logger.warning("[LinkedIn OAuth] Stage 4: State validation failed (nonce user mismatch)")
+                return None
+        logger.info("[LinkedIn OAuth] Stage 4: State validation succeeded for user_id=%s", user_id)
+        return user_id
+    except (JWTError, TypeError, ValueError) as exc:
+        logger.warning("[LinkedIn OAuth] Stage 4: State validation failed (%s)", type(exc).__name__)
+        return None
 
 
 # 🔹 Step 1: Login — redirects user to LinkedIn OAuth
 @router.get("/login")
 def login(current_user: User = Depends(get_current_user)):
-    # include the logged-in user's email as state so the callback can link the account
-    encoded_redirect = quote(REDIRECT_URI, safe="")
-    state = quote(current_user.email, safe="")
-    url = (
-        "https://www.linkedin.com/oauth/v2/authorization"
-        f"?response_type=code"
-        f"&client_id={CLIENT_ID}"
-        f"&redirect_uri={encoded_redirect}"
-        "&scope=openid%20profile%20w_member_social"
-        f"&state={state}"
-        "&prompt=login"
-    )
-    print(f"[DEBUG] OAuth URL: {url}")
-    print(f"[DEBUG] REDIRECT_URI: {REDIRECT_URI}")
+    logger.info("[LinkedIn OAuth] Stage 1: Authorization request initiated for user_id=%s", current_user.id)
+    if not CLIENT_ID or not CLIENT_SECRET or not REDIRECT_URI:
+        raise HTTPException(
+            status_code=500,
+            detail="LinkedIn OAuth is not configured. Missing LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, or REDIRECT_URI.",
+        )
+
+    state = _create_oauth_state(current_user.id)
+    query = urlencode({
+        "response_type": "code",
+        "client_id": CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "scope": "openid profile w_member_social",
+        "state": state,
+    })
+    url = f"https://www.linkedin.com/oauth/v2/authorization?{query}"
+    logger.info("[LinkedIn OAuth] Redirecting user_id=%s to LinkedIn OAuth with redirect_uri=%s", current_user.id, REDIRECT_URI)
     return {"auth_url": url}
 
 
@@ -45,13 +102,31 @@ def callback(
     state: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
+    dashboard_url = _get_dashboard_url()
+    logger.info(
+        "[LinkedIn OAuth] Stage 3: Callback received (has_code=%s, has_state=%s, error=%s)",
+        bool(code),
+        bool(state),
+        error or "none",
+    )
     try:
         if error or not code:
-            err_msg = error_description or error or "authorization_failed"
-            print(f"[DEBUG] Callback error from LinkedIn: {err_msg}")
-            return RedirectResponse(f"{FRONTEND_URL}?linkedin=error&message={quote(str(err_msg))}")
+            err_msg = error_description or error or "authorization_cancelled"
+            logger.info("[LinkedIn OAuth] Stage 9: Redirecting to dashboard with error=%s", err_msg)
+            return RedirectResponse(f"{dashboard_url}?linkedin=error&message={quote(str(err_msg))}")
 
-        print(f"[DEBUG] Callback received with code: {code[:10]}...")
+        logger.info("[LinkedIn OAuth] Stage 5: Authorization code received (length=%d)", len(code))
+
+        user_id = _validate_oauth_state(state)
+        if not user_id:
+            logger.warning("[LinkedIn OAuth] Stage 9: Redirecting to dashboard due to invalid state")
+            return RedirectResponse(f"{dashboard_url}?linkedin=error&message={quote('Invalid or expired OAuth state. Please try again.')}")
+
+        linked_user = db.query(User).filter(User.id == user_id).first()
+        if not linked_user:
+            logger.warning("[LinkedIn OAuth] Stage 8: User association failed (user_id=%s not found)", user_id)
+            return RedirectResponse(f"{dashboard_url}?linkedin=error&message={quote('User account not found.')}")
+
         # Exchange code for access token
         token_url = "https://www.linkedin.com/oauth/v2/accessToken"
         data = {
@@ -62,57 +137,72 @@ def callback(
             "client_secret": CLIENT_SECRET,
         }
 
-        res = requests.post(token_url, data=data)
-        token_data = res.json()
-        print(f"[DEBUG] Token response: {res.status_code} - {token_data}")
+        res = requests.post(
+            token_url,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15,
+        )
+        logger.info("[LinkedIn OAuth] Stage 6: Token exchange HTTP status=%s", res.status_code)
+        try:
+            token_data = res.json()
+        except Exception:
+            token_data = {}
 
-        if "access_token" not in token_data:
-            return RedirectResponse(f"{FRONTEND_URL}?linkedin=error&message=token_failed")
+        if res.status_code != 200 or "access_token" not in token_data:
+            li_err = token_data.get("error_description") or token_data.get("error") or "token_exchange_failed"
+            logger.warning("[LinkedIn OAuth] Stage 7: Token exchange failed (%s)", li_err)
+            return RedirectResponse(f"{dashboard_url}?linkedin=error&message={quote(str(li_err))}")
 
+        logger.info("[LinkedIn OAuth] Stage 7: Token exchange succeeded")
 
         access_token = token_data.get("access_token")
         refresh_token = token_data.get("refresh_token")
         expires_in = token_data.get("expires_in")
 
-        # Get user info
+        # Get user info from LinkedIn
         headers = {"Authorization": f"Bearer {access_token}"}
-        user_info = requests.get("https://api.linkedin.com/v2/userinfo", headers=headers).json()
+        user_info_res = requests.get("https://api.linkedin.com/v2/userinfo", headers=headers, timeout=15)
+        user_info = user_info_res.json() if user_info_res.status_code == 200 else {}
         linkedin_id = user_info.get("sub")
 
         if not linkedin_id:
-            return RedirectResponse(f"{FRONTEND_URL}?linkedin=error&message=no_user_id")
+            logger.warning("[LinkedIn OAuth] Stage 8: Failed to retrieve LinkedIn user sub (status=%s)", user_info_res.status_code)
+            return RedirectResponse(f"{dashboard_url}?linkedin=error&message=no_user_id")
 
-        linked_user = None
-        if state:
-            linked_user = db.query(User).filter(User.email == state).first()
+        expires_at = None
+        if expires_in:
+            expires_at = (datetime.utcnow() + timedelta(seconds=int(expires_in))).isoformat()
 
-        # Save or update user in DB. If state was provided (email), link to that user.
-        existing_user = db.query(LinkedInUser).filter(LinkedInUser.linkedin_id == linkedin_id).first()
-        if existing_user:
-            existing_user.access_token = access_token
-            if linked_user:
-                existing_user.user_id = linked_user.id
+        # Store or update LinkedIn connection strictly for this authenticated user
+        existing_for_user = db.query(LinkedInUser).filter(LinkedInUser.user_id == linked_user.id).first()
+        if existing_for_user:
+            existing_for_user.linkedin_id = linkedin_id
+            existing_for_user.access_token = access_token
             if refresh_token:
-                existing_user.refresh_token = refresh_token
-            if expires_in:
-                from datetime import datetime, timedelta
-                existing_user.expires_at = (datetime.utcnow() + timedelta(seconds=int(expires_in))).isoformat()
+                existing_for_user.refresh_token = refresh_token
+            if expires_at:
+                existing_for_user.expires_at = expires_at
         else:
-            user = LinkedInUser(linkedin_id=linkedin_id, access_token=access_token, user_id=(linked_user.id if linked_user else None))
-            if refresh_token:
-                user.refresh_token = refresh_token
-            if expires_in:
-                from datetime import datetime, timedelta
-                user.expires_at = (datetime.utcnow() + timedelta(seconds=int(expires_in))).isoformat()
-            db.add(user)
+            new_li_user = LinkedInUser(
+                user_id=linked_user.id,
+                linkedin_id=linkedin_id,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+            )
+            db.add(new_li_user)
         db.commit()
+        logger.info("[LinkedIn OAuth] Stage 8: Associated linkedin_id=%s with user_id=%s", linkedin_id, linked_user.id)
 
-        # Redirect back to frontend with success
-        return RedirectResponse(f"{FRONTEND_URL}?linkedin=success")
-
+        # Redirect back to existing dashboard with success
+        logger.info("[LinkedIn OAuth] Stage 9: Redirecting to %s?linkedin=success", dashboard_url)
+        return RedirectResponse(f"{dashboard_url}?linkedin=success")
 
     except Exception as e:
-        return RedirectResponse(f"{FRONTEND_URL}?linkedin=error&message={str(e)}")
+        db.rollback()
+        logger.error("[LinkedIn OAuth] Stage 9: Callback exception (%s)", str(e))
+        return RedirectResponse(f"{dashboard_url}?linkedin=error&message={quote(str(e))}")
 
 
 # 🔹 Check if a LinkedIn account is connected
@@ -120,7 +210,7 @@ def callback(
 def status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Return connection status for the authenticated user only
     linked = db.query(LinkedInUser).filter(LinkedInUser.user_id == current_user.id).first()
-    if linked:
+    if linked and linked.access_token:
         return {"connected": True, "linkedin_id": linked.linkedin_id}
     return {"connected": False}
 
